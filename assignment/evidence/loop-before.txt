@@ -1,0 +1,107 @@
+(p4-python-venv) root@codespaces-189515:/workspaces/p4-lab# cp tunnel.p4 tunnel_v1.p4
+(p4-python-venv) root@codespaces-189515:/workspaces/p4-lab# git checkout -b hop-limit
+Switched to a new branch 'hop-limit'
+(p4-python-venv) root@codespaces-189515:/workspaces/p4-lab# git add tunnel_v1.p4
+(p4-python-venv) root@codespaces-189515:/workspaces/p4-lab# git commit -m "Keep the finished lab program as tunnel_v1.p4"
+[hop-limit ca7defe] Keep the finished lab program as tunnel_v1.p4
+ 1 file changed, 217 insertions(+)
+ create mode 100644 tunnel_v1.p4
+(p4-python-venv) root@codespaces-189515:/workspaces/p4-lab# git branch
+* hop-limit
+  main
+(p4-python-venv) root@codespaces-189515:/workspaces/p4-lab# python3 topo.py --id 4884
+*** Compiling tunnel.p4
+*** Configuring hosts
+h1 h2 h3 
+*** Starting controller
+
+*** Starting 2 switches
+s1 s2 
+*** s1: 6 table entries added
+*** s2: 6 table entries added
+*** Your hosts: h1 10.84.0.1, h2 10.84.0.2, h3 10.84.0.3
+*** Ready. Switch logs: logs/s1.txt, logs/s2.txt. What h2 and h3 receive: logs/h2.txt, logs/h3.txt
+*** Starting CLI:
+mininet> sh ./p4cli s2 table_dump MyIngress.myTunnel_exact
+Done
+==========
+TABLE ENTRIES
+**********
+Dumping entry 0x0
+Match key:
+* myTunnel.dst_id     : EXACT     0001
+Action entry: MyIngress.myTunnel_forward - 01
+**********
+Dumping entry 0x1
+Match key:
+* myTunnel.dst_id     : EXACT     0002
+Action entry: MyIngress.myTunnel_forward - 02
+**********
+Dumping entry 0x2
+Match key:
+* myTunnel.dst_id     : EXACT     0003
+Action entry: MyIngress.myTunnel_forward - 03
+==========
+Dumping default entry
+Action entry: MyIngress.drop - 
+==========
+mininet> sh ./p4cli s2 "table_modify MyIngress.myTunnel_exact MyIngress.myTunnel_forward 0x2 1"
+Done
+Error: Bad format for entry handle
+mininet> sh ./p4cli s2 "table_modify MyIngress.myTunnel_exact 2 MyIngress.myTunnel_forward 1"
+Done
+Error: Table MyIngress.myTunnel_exact has no action 2
+mininet> sh ./p4cli s2 "table_modify MyIngress.myTunnel_exact MyIngress.myTunnel_forward 2 1"
+Done
+Modifying entry 2 for exact match table MyIngress.myTunnel_exact
+mininet> h1 python3 send.py 10.84.0.3 "loop" --tunnel 3
+###[ Ethernet ]### 
+  dst       = ff:ff:ff:ff:ff:ff
+  src       = 00:00:00:00:00:01
+  type      = 0x1212
+###[ MyTunnel ]### 
+     proto_id  = 2048
+     dst_id    = 3
+###[ IP ]### 
+        version   = 4
+        ihl       = 5
+        tos       = 0x0
+        len       = 32
+        id        = 1
+        flags     = 
+        frag      = 0
+        ttl       = 64
+        proto     = udp
+        chksum    = 0x6621
+        src       = 10.84.0.1
+        dst       = 10.84.0.3
+        \options   \
+###[ UDP ]### 
+           sport     = 4321
+           dport     = 4321
+           len       = 12
+           chksum    = 0xed88
+###[ Raw ]### 
+              load      = 'loop'
+
+Sent from h1-eth0.
+mininet> sh grep -c "Processing packet received" logs/s1.txt logs/s2.txt
+logs/s1.txt:636
+logs/s2.txt:635
+mininet> sh sleep 5; grep -c "Processing packet received" logs/s1.txt logs/s2.txt
+logs/s1.txt:1512
+logs/s2.txt:1510
+mininet> sh mkdir -p assignment/evidence
+mininet> nano assignment/evidence/loop-before.txt
+*** Unknown command: nano assignment/evidence/loop-before.txt
+mininet> exit
+*** Stopping 0 controllers
+
+*** Stopping 4 links
+....
+*** Stopping 2 switches
+s1 s2 
+*** Stopping 3 hosts
+h1 h2 h3 
+*** Done
+(p4-python-venv) root@codespaces-189515:/workspaces/p4-lab# nano assignment/evidence/loop-before.txt
