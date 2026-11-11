@@ -1,9 +1,8 @@
-/* Week 5 lab — IPv4 forwarding, plus a custom tunnel header that you will finish.
- *
- * As supplied, this program forwards IPv4 by longest-prefix match. The tunnel header, its
- * table and its action are already declared; Steps 4–6 of the lab connect them to the
- * parser, the ingress control and the deparser. Look for the TODO comments.
+
+/*
+ * Week 5 lab — IPv4 forwarding and custom tunnel header.
  */
+
 #include <core.p4>
 #include <v1model.p4>
 
@@ -14,7 +13,7 @@ typedef bit<9>  egressSpec_t;
 typedef bit<48> macAddr_t;
 typedef bit<32> ip4Addr_t;
 
-/*************************** HEADERS ***************************/
+/************************ HEADERS ************************/
 
 header ethernet_t {
     macAddr_t dstAddr;
@@ -23,8 +22,9 @@ header ethernet_t {
 }
 
 header myTunnel_t {
-    bit<16> proto_id;   // what follows the tunnel header, like etherType (0x0800: IPv4)
-    bit<16> dst_id;     // which tunnel exit to deliver to: 1 = h1, 2 = h2, 3 = h3
+    bit<16> proto_id;
+    bit<16> dst_id;
+    bit<8> hop_limit;
 }
 
 header ipv4_t {
@@ -50,23 +50,33 @@ struct headers {
     ipv4_t     ipv4;
 }
 
-/*************************** PARSER ***************************/
+/************************ PARSER ************************/
 
-parser MyParser(packet_in packet,
-                out headers hdr,
-                inout metadata meta,
-                inout standard_metadata_t standard_metadata) {
+parser MyParser(
+    packet_in packet,
+    out headers hdr,
+    inout metadata meta,
+    inout standard_metadata_t standard_metadata
+) {
 
     state start {
         packet.extract(hdr.ethernet);
+
         transition select(hdr.ethernet.etherType) {
             TYPE_IPV4: parse_ipv4;
-            // TODO (Step 4): send TYPE_MYTUNNEL packets to a parse_myTunnel state
+            TYPE_MYTUNNEL: parse_myTunnel;
             default: accept;
         }
     }
 
-    // TODO (Step 4): add the parse_myTunnel state here
+    state parse_myTunnel {
+        packet.extract(hdr.myTunnel);
+
+        transition select(hdr.myTunnel.proto_id) {
+            TYPE_IPV4: parse_ipv4;
+            default: accept;
+        }
+    }
 
     state parse_ipv4 {
         packet.extract(hdr.ipv4);
@@ -74,17 +84,22 @@ parser MyParser(packet_in packet,
     }
 }
 
-/*************************** CHECKSUM VERIFICATION ***************************/
+/**************** CHECKSUM VERIFICATION ****************/
 
-control MyVerifyChecksum(inout headers hdr, inout metadata meta) {
+control MyVerifyChecksum(
+    inout headers hdr,
+    inout metadata meta
+) {
     apply { }
 }
 
-/*************************** INGRESS ***************************/
+/************************ INGRESS ************************/
 
-control MyIngress(inout headers hdr,
-                  inout metadata meta,
-                  inout standard_metadata_t standard_metadata) {
+control MyIngress(
+    inout headers hdr,
+    inout metadata meta,
+    inout standard_metadata_t standard_metadata
+) {
 
     action drop() {
         mark_to_drop(standard_metadata);
@@ -96,65 +111,111 @@ control MyIngress(inout headers hdr,
     }
 
     table ipv4_lpm {
-        key = { hdr.ipv4.dstAddr: lpm; }
-        actions = { ipv4_forward; drop; }
+        key = {
+            hdr.ipv4.dstAddr: lpm;
+        }
+
+        actions = {
+            ipv4_forward;
+            drop;
+        }
+
         size = 1024;
         default_action = drop();
     }
 
     action myTunnel_forward(egressSpec_t port) {
+
+    if (hdr.myTunnel.hop_limit == 0) {
+        mark_to_drop(standard_metadata);
+    }
+    else {
+        hdr.myTunnel.hop_limit =
+            hdr.myTunnel.hop_limit - 1;
+
         standard_metadata.egress_spec = port;
     }
+}
 
     table myTunnel_exact {
-        key = { hdr.myTunnel.dst_id: exact; }
-        actions = { myTunnel_forward; drop; }
+        key = {
+            hdr.myTunnel.dst_id: exact;
+        }
+
+        actions = {
+            myTunnel_forward;
+            drop;
+        }
+
         size = 1024;
         default_action = drop();
     }
 
     apply {
-        // TODO (Step 5): tunnelled packets should use myTunnel_exact instead
-        if (hdr.ipv4.isValid()) {
+        if (hdr.myTunnel.isValid()) {
+            myTunnel_exact.apply();
+        }
+        else if (hdr.ipv4.isValid()) {
             ipv4_lpm.apply();
-        } else {
+        }
+        else {
             drop();
         }
     }
 }
 
-/*************************** EGRESS ***************************/
+/************************ EGRESS ************************/
 
-control MyEgress(inout headers hdr,
-                 inout metadata meta,
-                 inout standard_metadata_t standard_metadata) {
+control MyEgress(
+    inout headers hdr,
+    inout metadata meta,
+    inout standard_metadata_t standard_metadata
+) {
     apply { }
 }
 
-/*************************** CHECKSUM COMPUTATION ***************************/
+/**************** CHECKSUM COMPUTATION ****************/
 
-// ipv4_forward changes the TTL, so the IPv4 header checksum must be recomputed.
-control MyComputeChecksum(inout headers hdr, inout metadata meta) {
+control MyComputeChecksum(
+    inout headers hdr,
+    inout metadata meta
+) {
     apply {
         update_checksum(
             hdr.ipv4.isValid(),
-            { hdr.ipv4.version, hdr.ipv4.ihl, hdr.ipv4.diffserv, hdr.ipv4.totalLen,
-              hdr.ipv4.identification, hdr.ipv4.flags, hdr.ipv4.fragOffset,
-              hdr.ipv4.ttl, hdr.ipv4.protocol, hdr.ipv4.srcAddr, hdr.ipv4.dstAddr },
+            {
+                hdr.ipv4.version,
+                hdr.ipv4.ihl,
+                hdr.ipv4.diffserv,
+                hdr.ipv4.totalLen,
+                hdr.ipv4.identification,
+                hdr.ipv4.flags,
+                hdr.ipv4.fragOffset,
+                hdr.ipv4.ttl,
+                hdr.ipv4.protocol,
+                hdr.ipv4.srcAddr,
+                hdr.ipv4.dstAddr
+            },
             hdr.ipv4.hdrChecksum,
-            HashAlgorithm.csum16);
+            HashAlgorithm.csum16
+        );
     }
 }
 
-/*************************** DEPARSER ***************************/
+/************************ DEPARSER ************************/
 
-control MyDeparser(packet_out packet, in headers hdr) {
+control MyDeparser(
+    packet_out packet,
+    in headers hdr
+) {
     apply {
         packet.emit(hdr.ethernet);
-        // TODO (Step 4): emit the tunnel header (only valid headers are written)
+        packet.emit(hdr.myTunnel);
         packet.emit(hdr.ipv4);
     }
 }
+
+/************************ MAIN ************************/
 
 V1Switch(
     MyParser(),
